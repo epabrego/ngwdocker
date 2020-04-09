@@ -1,0 +1,3 @@
+#!/bin/bash
+set -e
+exec /opt/ngw/env/bin/pserve --reload /opt/ngw/config/app/pserve.ini

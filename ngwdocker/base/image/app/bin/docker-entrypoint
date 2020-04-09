@@ -1,0 +1,30 @@
+#!/bin/bash
+set -e
+
+if [ ! "$(ls -A $NGWROOT/config/app)" ]; then
+    echo "Unpacking config from app.tar.gz ..." > /dev/stderr
+    tar -C $NGWROOT/config -zxf $NGWROOT/build/config/app.tar.gz 
+fi
+
+export PATH=$NGWROOT/bin:$NGWROOT/env/bin:$PATH
+
+if [ "$NGWDOCKER_DEFAULT_INSTANCE" = "yes" ]; then
+
+    if [ "$NGWDOCKER_WAIT_FOR_SERVICE" = "yes" ]; then
+        nextgisweb wait_for_service
+    fi
+
+    if [ ! -d "$NGWROOT/data/app/ngwdocker" ]; then 
+        mkdir $NGWROOT/data/app/ngwdocker
+    fi
+
+    F_INITIALIZE_DB="$NGWROOT/data/app/ngwdocker/INITIALIZE_DB"
+    if [ "$NGWDOCKER_INITIALIZE_DB" = "yes" -a ! -f "$F_INITIALIZE_DB" ]; then 
+        echo "Database initialization ..." > /dev/stderr
+        nextgisweb initialize_db
+        touch "$F_INITIALIZE_DB"
+    fi
+
+fi
+
+exec "$@"

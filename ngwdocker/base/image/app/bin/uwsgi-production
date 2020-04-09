@@ -1,0 +1,11 @@
+#!/bin/bash
+set -e
+
+UWSGI_MODE="${UWSGI_MODE:-http}"
+UWSGI_OPTS="${UWSGI_OPTS}"
+
+if [ "$UWSGI_MODE" = "http" ]; then
+    UWSGI_OPTS="--http-timeout=${UWSGI_HTTP_TIMEOUT:-900} ${UWSGI_OPTS}"
+fi
+
+exec /opt/ngw/env/bin/uwsgi --${UWSGI_MODE}=0.0.0.0:8080 ${UWSGI_OPTS} --ini /opt/ngw/config/app/uwsgi.ini

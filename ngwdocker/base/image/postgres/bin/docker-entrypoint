@@ -1,0 +1,75 @@
+#!/bin/bash
+set -e
+export PATH=$NGWROOT/bin:$NGWROOT/env/bin:/usr/lib/postgresql/$POSTGRES_MAJOR/bin:$PATH
+export PGDATA=$NGWROOT/data/postgres
+
+if [ ! "$(ls -A $NGWROOT/config/postgres)" ]; then
+    echo "Unpacking config from postgres.tar.gz ..." > /dev/stderr
+    tar -C $NGWROOT/config -zxf $NGWROOT/build/config/postgres.tar.gz 
+fi
+
+if [ "$NGWDOCKER_DEFAULT_INSTANCE" = "yes" ]; then
+
+    if [ ! -z "$POSTGRES_PASSWORD" ]; then
+        TMP_SECRET_FILE=$(mktemp -p $NGWROOT/secret)
+        echo "$POSTGRES_PASSWORD" > $TMP_SECRET_FILE
+        mv "$TMP_SECRET_FILE" $NGWROOT/secret/postgres
+        echo "Value of \$POSTGRES_PASSWORD was copied to secret directory. " \
+            "Remove it from configuration as soon as possible!" > /dev/stderr
+    fi
+
+fi
+
+if [ "$NGWDOCKER_POSTGRES_INITDB" = "yes" ]; then
+
+    if [ ! -s "$PGDATA/PG_VERSION" ]; then
+        initdb --pgdata "$PGDATA" \
+            --username postgres \
+            --locale C --encoding UTF-8 \
+            --auth-local trust \
+            --auth-host md5
+      
+        # Allow connections not only from localhost
+        sed -ri "s!^#?(listen_addresses)\s*=\s*\S+.*!\1 = '*'!" $PGDATA/postgresql.conf
+        sed -ri 's!127.0.0.1\/32!all         !g' $PGDATA/pg_hba.conf
+
+        echo "include '$NGWROOT/config/postgres/postgresql.conf'" >> $PGDATA/postgresql.conf
+
+        if [ "$NGWDOCKER_DEFAULT_INSTANCE" = "yes" ]; then
+            if [ ! -f "$NGWROOT/secret/postgres" ]; then
+                TMP_SECRET_FILE=$(mktemp -p $NGWROOT/secret)
+                echo "Generating random password..." > /dev/stderr
+                < /dev/urandom tr -dc A-Z-a-z-0-9 | head -c16 > $TMP_SECRET_FILE
+                mv "$TMP_SECRET_FILE" $NGWROOT/secret/postgres
+            fi
+
+            pg_ctl --pgdata "$PGDATA" -w start -o "-c listen_addresses=''"
+            psql=( psql -v ON_ERROR_STOP=1 --no-password )
+
+            ${psql[@]} --dbname postgres \
+                --set user=nextgisweb \
+                --set pw="'$(cat $NGWROOT/secret/postgres)'" <<< "
+                CREATE USER :user PASSWORD :pw;
+                CREATE DATABASE :user OWNER :user;
+                "
+
+            psql+=( --dbname nextgisweb )
+
+            ${psql[@]} --set user=nextgisweb <<< "
+                CREATE EXTENSION IF NOT EXISTS postgis;
+                CREATE EXTENSION IF NOT EXISTS hstore; 
+                
+                ALTER TABLE spatial_ref_sys OWNER TO :user;
+                ALTER TABLE geography_columns OWNER TO :user;
+                ALTER TABLE geometry_columns OWNER TO :user;
+                ALTER TABLE raster_columns OWNER TO :user;
+                ALTER TABLE raster_overviews OWNER TO :user;
+                "
+
+            pg_ctl --pgdata "$PGDATA" -w stop -m fast
+        fi
+    fi
+
+fi
+
+exec "$@"
